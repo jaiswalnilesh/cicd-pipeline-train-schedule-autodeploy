@@ -3,6 +3,7 @@ pipeline {
     environment {
         //be sure to replace "willbla" with your own Docker Hub username
         DOCKER_IMAGE_NAME = "jaiswalnilesh/train-schedule"
+        CANARY_REPLICAS = 0
     }
     stages {
         stage('Build') {
@@ -53,27 +54,48 @@ pipeline {
                 )
             }
         }
+        // Add smoke test stage
+        stage('smoke test'){
+            when {
+                branch: 'master'
+            }
+            steps {
+                script {
+                    def response = http:Request {
+                            // verify canary pod to check test
+                            url: "http://$KUBE_MASTER_IP:8081/", 
+                            timemout: 30
+                    }
+                    if (response.status != 200){
+                        error("Smoke test against canary deplyoment failed")
+                    }
+                }
+            }
+        }
         stage('DeployToProduction') {
             when {
                 branch 'master'
             }
-            environment { 
-                CANARY_REPLICAS = 0
-            }
+
             steps {
+                // For fully automated deployment, you don't need any manual approval so you can remove below input from the steps, make it more automated way  before deployment
                 input 'Deploy to Production?'
                 milestone(1)
-                kubernetesDeploy(
-                    kubeconfigId: 'kubeconfig',
-                    configs: 'train-schedule-kube-canary.yml',
-                    enableConfigSubstitution: true
-                )
                 kubernetesDeploy(
                     kubeconfigId: 'kubeconfig',
                     configs: 'train-schedule-kube.yml',
                     enableConfigSubstitution: true
                 )
             }
+        }
+    }
+    post {
+        cleanup {
+                kubernetesDeploy(
+                    kubeconfigId: 'kubeconfig',
+                    configs: 'train-schedule-kube-canary.yml',
+                    enableConfigSubstitution: true
+                )
         }
     }
 }
